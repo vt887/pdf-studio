@@ -1,5 +1,3 @@
-SHELL := /bin/zsh
-
 SAMPLE ?= sample.png
 BOOK_INPUT ?= book
 BOOK_OUTPUT ?= output
@@ -33,9 +31,6 @@ format:
 	$(POETRY) run ruff format .
 
 check: lint test
-
-stub-render:
-	curl -sS -X POST -F "file=@$(SAMPLE)" http://localhost:8000/v1/documents
 
 smoke-book:
 	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --force --spread-mode auto-mixed
