@@ -1,0 +1,16 @@
+.git
+.venv
+__pycache__
+.pytest_cache
+.mypy_cache
+node_modules
+apps/review-ui/node_modules
+apps/review-ui/dist
+data
+artifacts
+book
+output
+pdf-vault
+docs
+*.sqlite
+*.db

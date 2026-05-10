@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-studio-document-model"
+version = "0.1.0"
+description = "Document Reconstruction Model for pdf-studio"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.10"]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

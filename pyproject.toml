@@ -1,0 +1,47 @@
+[tool.poetry]
+name = "pdf-studio"
+version = "0.1.0"
+description = "Local-first scan-to-structured PDF pipeline"
+authors = ["Codex"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+fastapi = "0.115.6"
+uvicorn = { version = "0.34.0", extras = ["standard"] }
+python-multipart = "0.0.20"
+pydantic = "2.10.4"
+pillow = "11.0.0"
+pymupdf = "1.25.1"
+httpx = "0.28.1"
+sqlalchemy = "2.0.36"
+psycopg = { version = "3.2.3", extras = ["binary"] }
+alembic = "1.14.0"
+redis = "5.2.1"
+rq = "1.16.2"
+pdf-studio-document-model = { path = "packages/document-model", develop = true }
+pdf-studio-pdf-renderer = { path = "packages/pdf-renderer", develop = true }
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.4"
+pytest-cov = "^6.0.0"
+ruff = "^0.8.6"
+mypy = "^1.13.0"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/document-model/tests", "packages/pdf-renderer/tests", "apps/api/tests", "apps/worker/tests"]
+filterwarnings = [
+    "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",
+    "ignore:builtin type swigvarlink has no __module__ attribute:DeprecationWarning",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"

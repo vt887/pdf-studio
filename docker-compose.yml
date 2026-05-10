@@ -1,0 +1,63 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pdf_studio
+    volumes:
+      - pdf-studio-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pdf_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      APP_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/pdf_studio}
+      REDIS_URL: ${REDIS_URL:-redis://10.0.1.2:6379/0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-pdf-studio}
+      ARTIFACT_ROOT: /artifacts
+      PYTHONPATH: /app/packages/document-model/src:/app/packages/pdf-renderer/src:/app/apps/api
+    ports:
+      - "8000:8000"
+    volumes:
+      - pdf-studio-artifacts:/artifacts
+    depends_on:
+      - postgres
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      APP_ENV: development
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/pdf_studio}
+      REDIS_URL: ${REDIS_URL:-redis://10.0.1.2:6379/0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-pdf-studio}
+      ARTIFACT_ROOT: /artifacts
+      PYTHONPATH: /app/packages/document-model/src:/app/packages/pdf-renderer/src:/app/apps/worker:/app/apps/api
+    volumes:
+      - pdf-studio-artifacts:/artifacts
+    depends_on:
+      - postgres
+
+  review-ui:
+    build:
+      context: .
+      dockerfile: apps/review-ui/Dockerfile
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pdf-studio-postgres:
+  pdf-studio-artifacts:

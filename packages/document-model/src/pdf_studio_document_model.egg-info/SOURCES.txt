@@ -1,0 +1,11 @@
+pyproject.toml
+src/document_model/__init__.py
+src/document_model/schema.py
+src/document_model/storage.py
+src/document_model/stub.py
+src/pdf_studio_document_model.egg-info/PKG-INFO
+src/pdf_studio_document_model.egg-info/SOURCES.txt
+src/pdf_studio_document_model.egg-info/dependency_links.txt
+src/pdf_studio_document_model.egg-info/requires.txt
+src/pdf_studio_document_model.egg-info/top_level.txt
+tests/test_schema_roundtrip.py

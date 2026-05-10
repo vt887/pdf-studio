@@ -1,0 +1,9 @@
+pyproject.toml
+src/pdf_renderer/__init__.py
+src/pdf_renderer/render.py
+src/pdf_studio_pdf_renderer.egg-info/PKG-INFO
+src/pdf_studio_pdf_renderer.egg-info/SOURCES.txt
+src/pdf_studio_pdf_renderer.egg-info/dependency_links.txt
+src/pdf_studio_pdf_renderer.egg-info/requires.txt
+src/pdf_studio_pdf_renderer.egg-info/top_level.txt
+tests/test_render_pdf.py

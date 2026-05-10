@@ -1,0 +1,14 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.venv/
+dist/
+build/
+node_modules/
+apps/review-ui/dist/
+book/
+output/
+data/
+artifacts/
+*.sqlite
+*.db
