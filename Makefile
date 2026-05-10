@@ -6,7 +6,7 @@ BOOK_OUTPUT ?= output
 PYTHONPATH ?= apps/worker:packages/document-model/src:packages/pdf-renderer/src
 POETRY ?= poetry
 
-.PHONY: install up migrate test test-unit test-api test-worker test-e2e lint format check stub-render smoke-book ingest-book ingest-book-force ingest-book-verbose ingest-book-force-verbose ingest-book-auto-mixed ingest-book-auto-mixed-force ingest-book-auto-mixed-verbose ingest-book-ocr ingest-book-ocr-force inspect-output full-stack-smoke
+.PHONY: install up migrate test test-unit test-e2e lint format check stub-render smoke-book ingest-book ingest-book-force ingest-book-verbose ingest-book-force-verbose ingest-book-auto-mixed ingest-book-auto-mixed-force ingest-book-auto-mixed-verbose ingest-book-ocr ingest-book-ocr-force inspect-output full-stack-smoke
 
 install:
 	$(POETRY) install
@@ -21,13 +21,7 @@ test:
 	$(POETRY) run pytest packages/document-model/tests packages/pdf-renderer/tests apps/worker/tests apps/api/tests
 
 test-unit:
-	$(POETRY) run pytest packages/document-model/tests packages/pdf-renderer/tests -q
-
-test-api:
-	$(POETRY) run pytest apps/api/tests -q
-
-test-worker:
-	$(POETRY) run pytest apps/worker/tests -q
+	$(POETRY) run pytest packages/document-model/tests packages/pdf-renderer/tests apps/worker/tests apps/api/tests
 
 test-e2e:
 	scripts/e2e_stub_render.sh $(SAMPLE)

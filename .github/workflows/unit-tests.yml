@@ -20,8 +20,9 @@ jobs:
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install poetry
+          poetry install --no-interaction --no-root
 
       - name: Run unit tests
         run: |
-          pytest packages/document-model/tests packages/pdf-renderer/tests apps/worker/tests -q
+          make test-unit
