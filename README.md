@@ -159,6 +159,69 @@ You can override the local book/output paths:
 BOOK_INPUT=book BOOK_OUTPUT=output make ingest-book-auto-mixed-force
 ```
 
+## Where OCR runs
+
+OCR executes in the same environment as the ingestion command.
+
+**Local Poetry / Make targets** (`make ingest-book-ocr-force`, etc.) run OCR on the host machine and require Tesseract installed on the host:
+
+```bash
+brew install tesseract
+# optional: extra language packs
+brew install tesseract-lang
+```
+
+Example with a non-English language pack:
+
+```bash
+OCR_LANG=ukr+eng make ingest-book-ocr-force
+```
+
+**Docker worker** runs OCR inside the worker container. The `apps/worker/Dockerfile` now installs `tesseract-ocr` so OCR works out of the box after a rebuild:
+
+```bash
+docker compose build worker
+```
+
+> Docker-based local ingestion (mounting `book/` and `output/` into the worker container) is not yet wired via `docker compose`. Use the Poetry-based Make targets for local book ingestion. OCR via Docker is used when jobs are submitted through the API.
+
+## OCR smoke test
+
+Verify the full OCR pipeline end-to-end: normalized page image → OCR JSON → Document Reconstruction Model → searchable PDF.
+
+```bash
+make smoke-ocr
+```
+
+With verbose OCR output:
+
+```bash
+make smoke-ocr-verbose
+```
+
+With a non-English language pack:
+
+```bash
+OCR_LANG=ukr+eng make smoke-ocr
+```
+
+The script auto-generates a test image if `book/` is empty, then verifies:
+
+```text
+output/book.manifest.json
+output/book.model.json
+output/book.pdf
+output/artifacts/ocr/0001.ocr.json
+```
+
+Inspect results manually:
+
+```bash
+cat output/artifacts/ocr/0001.ocr.json   # OCR lines and words
+cat output/book.model.json               # document model with text_lines
+make inspect-output                      # full pipeline summary
+```
+
 ## Testing
 
 Recommended local checks:

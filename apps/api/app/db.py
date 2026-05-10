@@ -64,7 +64,13 @@ def create_document_row(document_id: str, source_path: str, status: str = "uploa
         )
 
 
-def create_job_row(job_id: str, document_id: str, job_type: str, status: str = "queued", queue_name: str = "default") -> None:
+def create_job_row(
+    job_id: str,
+    document_id: str,
+    job_type: str,
+    status: str = "queued",
+    queue_name: str = "default",
+) -> None:
     with session_scope() as session:
         session.add(
             JobRow(
@@ -86,7 +92,12 @@ def update_job_status(job_id: str, status: str, error_message: str | None = None
         job.error_message = error_message
 
 
-def update_document_status(document_id: str, status: str, output_pdf_path: str | None = None, model_path: str | None = None) -> None:
+def update_document_status(
+    document_id: str,
+    status: str,
+    output_pdf_path: str | None = None,
+    model_path: str | None = None,
+) -> None:
     with session_scope() as session:
         document = session.get(DocumentRow, document_id)
         if document is None:
@@ -118,7 +129,9 @@ def persist_document_model(document: DocumentModel, model_path: str) -> None:
 
         existing_pages = session.scalars(select(PageRow.id).where(PageRow.document_id == document.id)).all()
         if existing_pages:
-            existing_line_ids = session.scalars(select(TextLineRow.id).where(TextLineRow.page_id.in_(existing_pages))).all()
+            existing_line_ids = session.scalars(
+                select(TextLineRow.id).where(TextLineRow.page_id.in_(existing_pages))
+            ).all()
             if existing_line_ids:
                 session.execute(delete(WordRow).where(WordRow.line_id.in_(existing_line_ids)))
             session.execute(delete(TextLineRow).where(TextLineRow.page_id.in_(existing_pages)))
@@ -143,6 +156,9 @@ def persist_document_model(document: DocumentModel, model_path: str) -> None:
                     rotation=page.rotation,
                 )
             )
+        session.flush()
+
+        for page in document.pages:
             for block in page.blocks:
                 session.add(
                     LayoutBlockRow(
@@ -158,6 +174,9 @@ def persist_document_model(document: DocumentModel, model_path: str) -> None:
                         review_status=block.review_status,
                     )
                 )
+        session.flush()
+
+        for page in document.pages:
             for line in page.text_lines:
                 session.add(
                     TextLineRow(
@@ -180,6 +199,9 @@ def persist_document_model(document: DocumentModel, model_path: str) -> None:
                         review_status=line.review_status,
                     )
                 )
+        session.flush()
+
+        for page in document.pages:
             for word in page.words:
                 session.add(
                     WordRow(
@@ -229,6 +251,7 @@ def persist_document_model(document: DocumentModel, model_path: str) -> None:
                         review_status=link.review_status,
                     )
                 )
+        session.flush()
 
 
 def fetch_job(job_id: str) -> dict[str, Any] | None:
@@ -261,13 +284,27 @@ def fetch_document(document_id: str) -> dict[str, Any] | None:
         doc = session.get(DocumentRow, document_id)
         if doc is None:
             return None
-        pages = session.scalars(select(PageRow).where(PageRow.document_id == document_id).order_by(PageRow.page_number)).all()
+        pages = session.scalars(
+            select(PageRow).where(PageRow.document_id == document_id).order_by(PageRow.page_number)
+        ).all()
         page_ids = [p.id for p in pages]
-        blocks = session.scalars(select(LayoutBlockRow).where(LayoutBlockRow.page_id.in_(page_ids))).all() if page_ids else []
-        lines = session.scalars(select(TextLineRow).where(TextLineRow.page_id.in_(page_ids))).all() if page_ids else []
-        line_ids = [l.id for l in lines]
+        blocks = (
+            session.scalars(select(LayoutBlockRow).where(LayoutBlockRow.page_id.in_(page_ids))).all()
+            if page_ids
+            else []
+        )
+        lines = (
+            session.scalars(select(TextLineRow).where(TextLineRow.page_id.in_(page_ids))).all()
+            if page_ids
+            else []
+        )
+        line_ids = [text_line.id for text_line in lines]
         words = session.scalars(select(WordRow).where(WordRow.line_id.in_(line_ids))).all() if line_ids else []
-        assets = session.scalars(select(ImageAssetRow).where(ImageAssetRow.page_id.in_(page_ids))).all() if page_ids else []
+        assets = (
+            session.scalars(select(ImageAssetRow).where(ImageAssetRow.page_id.in_(page_ids))).all()
+            if page_ids
+            else []
+        )
         links = session.scalars(select(LinkRow).where(LinkRow.page_id.in_(page_ids))).all() if page_ids else []
 
         words_by_line: dict[str, list[dict[str, Any]]] = {}

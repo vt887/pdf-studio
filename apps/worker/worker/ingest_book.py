@@ -18,7 +18,7 @@ import fitz
 from document_model import StubPageInput, build_stub_document_model_from_pages, save_document_model
 from pdf_renderer import render_document
 from worker.spread import SpreadMode, SpreadDetectionResult, classify_spread, crop_boxes_for_spread, load_spread_overrides
-from worker.ocr import OcrEngine, OcrPageResult, TesseractOcrEngine, apply_ocr_results
+from worker.ocr import OcrEngine, OcrError, OcrPageResult, TesseractOcrEngine, apply_ocr_results
 
 TARGET_DPI = 300
 SUPPORTED_TYPES = {"png", "jpeg", "tiff", "pdf"}
@@ -1090,7 +1090,10 @@ def ingest_book(
         document_id=str(manifest_payload["document_id"]),
     )
     if ocr:
-        engine = ocr_engine or TesseractOcrEngine()
+        try:
+            engine = ocr_engine or TesseractOcrEngine()
+        except OcrError as exc:
+            raise IngestError(str(exc), stage="ocr") from exc
         ocr_results: list[OcrPageResult] = []
         for page in document.pages:
             page_manifest = next(item for item in manifest_payload["pages"] if int(item["page_number"]) == page.page_number)
@@ -1105,6 +1108,15 @@ def ingest_book(
                 force=force,
                 artifacts_rebuilt=rebuilt_map.get(page.page_number, False),
             )
+            page_label = f"{page.page_number:04d}"
+            word_count = sum(len(line.words) for line in ocr_result.lines)
+            confidences = [line.confidence for line in ocr_result.lines if line.confidence is not None]
+            avg_conf = f"{sum(confidences) / len(confidences):.2f}" if confidences else "n/a"
+            logger.stage("ocr", f"page {page_label} lines: {len(ocr_result.lines)} words: {word_count} avg_confidence: {avg_conf}")
+            logger.detail("ocr", f"engine: {ocr_result.engine} language: {ocr_result.language}")
+            logger.detail("ocr", f"artifact: {_ocr_artifact_path(ocr_dir, page.page_number)}")
+            if not ocr_result.lines:
+                logger.stage("ocr:warn", f"page {page_label} produced no text")
             ocr_results.append(ocr_result)
         apply_ocr_results(document, ocr_results)
     model_path = output_dir / "book.model.json"

@@ -36,6 +36,10 @@ select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 testpaths = ["packages/document-model/tests", "packages/pdf-renderer/tests", "apps/api/tests", "apps/worker/tests"]
+markers = [
+    "integration: marks tests requiring external services or real dependencies",
+    "requires_tesseract: marks tests requiring the tesseract binary on the host",
+]
 filterwarnings = [
     "ignore:builtin type SwigPyPacked has no __module__ attribute:DeprecationWarning",
     "ignore:builtin type SwigPyObject has no __module__ attribute:DeprecationWarning",

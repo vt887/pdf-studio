@@ -180,7 +180,11 @@ class TesseractOcrEngine:
         if self.executable is None:
             self.executable = shutil.which("tesseract")
         if not self.executable:
-            raise OcrError("Tesseract executable was not found. Install `tesseract` to use OCR.")
+            raise OcrError(
+                "Tesseract executable was not found.\n"
+                "[ocr:error] For local macOS runs: brew install tesseract\n"
+                "[ocr:error] For Docker runs: rebuild the worker image (tesseract-ocr is installed in apps/worker/Dockerfile)"
+            )
 
     def recognize_page(self, image_path: Path, page_number: int, dpi: int, language: str) -> OcrPageResult:
         command = [

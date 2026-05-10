@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
-
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.responses import FileResponse
+from typing import Annotated
 
 from document_model import load_document_model
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 
 from .artifacts import document_dir, model_path
 from .db import (
@@ -21,8 +20,7 @@ from .db import (
     fetch_job,
     init_database,
 )
-from .queue import enqueue_stub_render
-from .queue import redis_queue_name
+from .queue import enqueue_stub_render, redis_queue_name
 from .services.documents import store_source_file
 from .services.preprocessing import UnsupportedInputError, detect_input_type
 from .settings import settings
@@ -51,7 +49,7 @@ def health() -> dict[str, str]:
 
 
 @app.post("/v1/documents")
-async def create_document(file: UploadFile = File(...)) -> dict[str, str]:
+async def create_document(file: Annotated[UploadFile, File(...)]) -> dict[str, str]:
     suffix = Path(file.filename or "input.png").suffix or ".png"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as handle:
         temp_path = Path(handle.name)

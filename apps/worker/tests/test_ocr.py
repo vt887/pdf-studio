@@ -234,8 +234,59 @@ def test_tesseract_engine_fails_clearly_when_missing(monkeypatch: pytest.MonkeyP
         TesseractOcrEngine()
 
 
+def test_tesseract_missing_error_includes_install_hint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("worker.ocr.shutil.which", lambda _: None)
+    with pytest.raises(OcrError) as exc_info:
+        TesseractOcrEngine()
+    msg = str(exc_info.value)
+    assert "brew install tesseract" in msg
+    assert "worker image" in msg
+
+
 def test_cli_accepts_ocr_flags() -> None:
     parser = _build_parser()
     args = parser.parse_args(["--input", "book", "--output", "output", "--ocr", "--ocr-lang", "deu"])
     assert args.ocr is True
     assert args.ocr_lang == "deu"
+
+
+def test_ocr_result_preserves_normalized_artifact_path(tmp_path: Path) -> None:
+    artifact = str(tmp_path / "0001.normalized.png")
+    result = OcrPageResult(
+        page_number=1,
+        normalized_artifact=artifact,
+        engine="tesseract",
+        language="eng",
+        width_px=100,
+        height_px=100,
+        dpi=300,
+        lines=[],
+    )
+    assert result.normalized_artifact == artifact
+
+
+def test_avg_confidence_from_lines() -> None:
+    lines = [
+        OcrLine(id="l1", text="Hello", x=0, y=0, w=100, h=20, confidence=0.90, words=[]),
+        OcrLine(id="l2", text="World", x=0, y=30, w=100, h=20, confidence=0.80, words=[]),
+    ]
+    confidences = [line.confidence for line in lines if line.confidence is not None]
+    avg = sum(confidences) / len(confidences)
+    assert avg == pytest.approx(0.85)
+
+
+@pytest.mark.integration
+@pytest.mark.requires_tesseract
+def test_tesseract_recognizes_generated_image(tmp_path: Path) -> None:
+    from PIL import Image, ImageDraw
+
+    img_path = tmp_path / "test_page.png"
+    img = Image.new("RGB", (600, 200), color="white")
+    draw = ImageDraw.Draw(img)
+    draw.text((20, 60), "Hello OCR", fill="black")
+    img.save(img_path, format="PNG")
+
+    engine = TesseractOcrEngine()
+    result = engine.recognize_page(img_path, page_number=1, dpi=72, language="eng")
+    extracted = " ".join(line.text for line in result.lines).lower()
+    assert "hello" in extracted or "ocr" in extracted

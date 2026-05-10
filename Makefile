@@ -1,10 +1,11 @@
 SAMPLE ?= sample.png
 BOOK_INPUT ?= book
 BOOK_OUTPUT ?= output
+OCR_LANG ?= eng
 PYTHONPATH ?= apps/worker:packages/document-model/src:packages/pdf-renderer/src
 POETRY ?= poetry
 
-.PHONY: install up migrate test test-unit test-e2e lint format check stub-render smoke-book ingest-book ingest-book-force ingest-book-verbose ingest-book-force-verbose ingest-book-auto-mixed ingest-book-auto-mixed-force ingest-book-auto-mixed-verbose ingest-book-ocr ingest-book-ocr-force inspect-output full-stack-smoke
+.PHONY: install up migrate test test-unit test-e2e lint format check stub-render smoke-book smoke-ocr smoke-ocr-verbose ingest-book ingest-book-force ingest-book-verbose ingest-book-force-verbose ingest-book-auto-mixed ingest-book-auto-mixed-force ingest-book-auto-mixed-verbose ingest-book-ocr ingest-book-ocr-force inspect-output full-stack-smoke
 
 install:
 	$(POETRY) install
@@ -35,6 +36,12 @@ check: lint test
 smoke-book:
 	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --force --spread-mode auto-mixed
 
+smoke-ocr:
+	BOOK_INPUT=$(BOOK_INPUT) BOOK_OUTPUT=$(BOOK_OUTPUT) OCR_LANG=$(OCR_LANG) bash scripts/smoke_test_ocr.sh
+
+smoke-ocr-verbose:
+	BOOK_INPUT=$(BOOK_INPUT) BOOK_OUTPUT=$(BOOK_OUTPUT) OCR_LANG=$(OCR_LANG) VERBOSE=1 bash scripts/smoke_test_ocr.sh
+
 ingest-book:
 	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --spread-mode auto-mixed
 
@@ -57,10 +64,10 @@ ingest-book-auto-mixed-verbose:
 	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --verbose --spread-mode auto-mixed
 
 ingest-book-ocr:
-	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --ocr
+	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --ocr --spread-mode single-page
 
 ingest-book-ocr-force:
-	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --ocr --force
+	PYTHONPATH=$(PYTHONPATH) $(POETRY) run python -m worker.ingest_book --input $(BOOK_INPUT) --output $(BOOK_OUTPUT) --ocr --force --spread-mode single-page
 
 inspect-output:
 	$(POETRY) run python scripts/inspect_output.py --output $(BOOK_OUTPUT)
