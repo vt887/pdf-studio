@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import fitz
-
 from document_model import DocumentModel, ImageAsset, Link, PageModel, TextLine
 from pdf_renderer import render_document
+
 
 def _make_image(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,6 +84,7 @@ def test_render_pdf_contains_text_and_dimensions(tmp_path: Path) -> None:
         assert round(page.rect.height, 2) == 200
         text = page.get_text("text")
         assert "Hello PDF" in text
+        assert len(page.get_images()) >= 1
 
 
 def test_render_pdf_contains_link_annotation(tmp_path: Path) -> None:
@@ -98,3 +99,4 @@ def test_render_pdf_contains_link_annotation(tmp_path: Path) -> None:
         links = page.get_links()
         assert len(links) >= 1
         assert any(link.get("uri") == "https://example.com" for link in links)
+        assert len(page.get_images()) >= 1

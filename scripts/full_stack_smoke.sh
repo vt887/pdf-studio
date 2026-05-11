@@ -232,7 +232,8 @@ PY
 
 run_local_ingestion() {
   section "Local book ingestion"
-  PYTHONPATH=apps/worker poetry run python -m worker.ingest_book --input "$BOOK_INPUT" --output "$BOOK_OUTPUT" --force --spread-mode "$SPREAD_MODE"
+  export PYTHONPATH="apps/worker:packages/document-model/src:packages/pdf-renderer/src"
+  poetry run python -m worker.ingest_book --input "$BOOK_INPUT" --output "$BOOK_OUTPUT" --force --spread-mode "$SPREAD_MODE"
 }
 
 verify_outputs() {

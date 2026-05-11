@@ -12,3 +12,8 @@ data/
 artifacts/
 *.sqlite
 *.db
+tmp/gemini-reviews/
+tmp/claude-reviews/
+tmp/opencode-reviews/
+tmp/ollama-drafts/
+.env

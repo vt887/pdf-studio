@@ -7,16 +7,27 @@ from pathlib import Path
 
 import fitz
 import pytest
+from document_model import load_document_model
+from worker.ingest_book import IngestError, ingest_book
+from worker.ingest_book import main as ingest_main
+from worker.ocr import OcrPageResult
 
 Image = pytest.importorskip("PIL.Image")
-
-from document_model import load_document_model
-from worker.ingest_book import IngestError, ingest_book, main as ingest_main
 
 
 def _create_png(path: Path, size: tuple[int, int] = (20, 20)) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     img = Image.new("RGB", size, color=(255, 255, 255))
+    img.save(path, format="PNG")
+
+
+def _create_png_with_figure(path: Path, size: tuple[int, int] = (800, 1000)) -> None:
+    from PIL import ImageDraw
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", size, color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((200, 250, 600, 750), fill=(30, 30, 30))
     img.save(path, format="PNG")
 
 
@@ -31,6 +42,22 @@ def _create_tiff(path: Path, sizes: tuple[tuple[int, int], tuple[int, int]] = ((
     first = Image.new("RGB", sizes[0], color=(255, 255, 255))
     second = Image.new("RGB", sizes[1], color=(200, 200, 200))
     first.save(path, format="TIFF", save_all=True, append_images=[second])
+
+
+def _create_two_page_screenshot(path: Path, *, dark_gutter: bool = False) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    img = Image.new("RGB", (3840, 2400), color=(32, 32, 32))
+    left = Image.new("RGB", (1700, 2200), color=(250, 250, 250))
+    right = Image.new("RGB", (1700, 2200), color=(250, 250, 250))
+    img.paste(left, (120, 100))
+    img.paste(right, (2020, 100))
+    if dark_gutter:
+        gutter = Image.new("RGB", (360, 2400), color=(0, 0, 0))
+        img.paste(gutter, (1740, 0))
+    else:
+        gutter = Image.new("RGB", (320, 2400), color=(255, 255, 255))
+        img.paste(gutter, (1760, 0))
+    img.save(path, format="PNG")
 
 
 def _set_mtime(path: Path, ts: float) -> None:
@@ -78,6 +105,7 @@ def test_modified_time_fallback_works(tmp_path: Path, monkeypatch: pytest.Monkey
 
     def stat_no_birth(self: Path, *args, **kwargs):
         st = orig_stat(self)
+
         class StatProxy:
             st_birthtime = None
 
@@ -115,8 +143,8 @@ def test_manifest_order_used_by_stub_renderer(tmp_path: Path) -> None:
     out = tmp_path / "output"
     first = book / "01.png"
     second = book / "02.png"
-    _create_png(first, size=(20, 30))
-    _create_png(second, size=(40, 50))
+    _create_png(first, size=(1000, 1500))
+    _create_png(second, size=(1200, 1500))
     _set_mtime(first, 1000)
     _set_mtime(second, 2000)
 
@@ -134,6 +162,10 @@ def test_manifest_order_used_by_stub_renderer(tmp_path: Path) -> None:
     assert Path(result["pdf_path"]).exists()
     with fitz.open(result["pdf_path"]) as pdf:
         assert pdf.page_count == 2
+        assert pdf[0].get_images() == []
+        assert pdf[1].get_images() == []
+        assert "Page 1" in pdf[0].get_text("text")
+        assert "Page 2" in pdf[1].get_text("text")
 
 
 def test_default_cli_output_contains_stage_prefixes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -209,6 +241,25 @@ def test_auto_mixed_creates_expected_page_count(tmp_path: Path) -> None:
         assert pdf.page_count == 5
     model = load_document_model(result["model_path"])
     assert len(model.pages) == 5
+
+
+def test_auto_mixed_detects_16_10_two_page_screenshots(tmp_path: Path) -> None:
+    book = tmp_path / "book"
+    out = tmp_path / "output"
+    spread_white = book / "01.png"
+    spread_dark = book / "02.png"
+    _create_two_page_screenshot(spread_white, dark_gutter=False)
+    _create_two_page_screenshot(spread_dark, dark_gutter=True)
+    _set_mtime(spread_white, 1000)
+    _set_mtime(spread_dark, 2000)
+
+    result = ingest_book(book, out, spread_mode="auto-mixed")
+    manifest = json.loads(Path(result["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["pages_count"] == 4
+    assert manifest["spread_detection"]["two_page_count"] == 2
+    assert manifest["spread_detection"]["single_page_count"] == 0
+    assert manifest["sources"][0]["effective_type"] == "two-page"
+    assert manifest["sources"][1]["effective_type"] == "two-page"
 
 
 def test_page_order_preserved_across_single_and_two_page_sources(tmp_path: Path) -> None:
@@ -359,10 +410,17 @@ def test_summary_and_preprocess_metadata_are_created(tmp_path: Path) -> None:
     assert summary["artifacts_dir"].endswith("artifacts")
     assert summary["stages"][0]["name"] == "ingest"
     assert summary["stages"][-1]["name"] == "summary"
+    assert summary["render"]["pdf"] == result["pdf_path"]
+    assert summary["render"]["mode"] == "clean"
+    assert summary["render"]["page_images_included"] is False
     assert summary["render"]["pages_rendered"] == 1
-    assert summary["render"]["image_assets_rendered"] == 1
+    assert summary["render"]["image_assets_rendered"] == 0
     assert summary["render"]["text_lines_rendered"] == 1
+    assert summary["render"]["words_rendered"] == 2
     assert summary["render"]["links_rendered"] == 0
+    assert "debug_pdf" not in summary["render"]
+    assert not (out / "debug" / "book.debug.pdf").exists()
+    assert not (out / "debug" / "book.pdf").exists()
     preprocess = Path(out / "artifacts" / "pages" / "0001.preprocess.json")
     assert preprocess.exists()
     preprocess_payload = json.loads(preprocess.read_text(encoding="utf-8"))
@@ -401,9 +459,78 @@ def test_renderer_counts_are_included_in_summary(tmp_path: Path) -> None:
     result = ingest_book(book, out)
     summary = json.loads(Path(result["summary_path"]).read_text(encoding="utf-8"))
     assert summary["render"]["pages_rendered"] == 1
-    assert summary["render"]["image_assets_rendered"] == 1
+    assert summary["render"]["page_images_included"] is False
+    assert summary["render"]["image_assets_rendered"] == 0
     assert summary["render"]["text_lines_rendered"] == 1
+    assert summary["render"]["words_rendered"] == 2
     assert summary["render"]["links_rendered"] == 0
+
+
+def test_blank_ocr_pages_render_without_images_and_warn(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    class _BlankOcrEngine:
+        def recognize_page(self, image_path: Path, page_number: int, dpi: int, language: str) -> OcrPageResult:
+            return OcrPageResult(
+                page_number=page_number,
+                normalized_artifact=str(image_path),
+                engine="fake",
+                language=language,
+                width_px=100,
+                height_px=100,
+                dpi=dpi,
+                lines=[],
+            )
+
+    book = tmp_path / "book"
+    out = tmp_path / "output"
+    source = book / "scan.png"
+    _create_png(source)
+    _set_mtime(source, 1111)
+
+    result = ingest_book(book, out, ocr=True, ocr_engine=_BlankOcrEngine())
+    stdout = capsys.readouterr().out
+    assert "[ocr] page 0001" in stdout
+    assert "[ocr] input:" in stdout
+    assert "[ocr] source_file:" in stdout
+    assert "[ocr] side: single" in stdout
+    assert "[ocr] artifact:" in stdout
+    assert "[ocr] summary:" in stdout
+    assert "derived pages: 1" in stdout
+    assert "ocr artifacts: 1" in stdout
+    assert "[render:warn] page 0001 has no OCR text; rendered blank page" in stdout
+    with fitz.open(result["pdf_path"]) as pdf:
+        assert pdf.page_count == 1
+        assert pdf[0].get_images() == []
+        assert pdf[0].get_text("text").strip() == ""
+
+
+def test_extract_images_flag_saves_assets_and_renders_them(tmp_path: Path) -> None:
+    class _FakeOcrEngine:
+        def recognize_page(self, image_path: Path, page_number: int, dpi: int, language: str) -> OcrPageResult:
+            return OcrPageResult(
+                page_number=page_number,
+                normalized_artifact=str(image_path),
+                engine="fake",
+                language=language,
+                width_px=800,
+                height_px=1000,
+                dpi=dpi,
+                lines=[],
+            )
+
+    book = tmp_path / "book"
+    out = tmp_path / "output"
+    source = book / "scan.png"
+    _create_png_with_figure(source)
+    _set_mtime(source, 1111)
+
+    result = ingest_book(book, out, ocr=True, extract_images=True, ocr_engine=_FakeOcrEngine())
+    summary = json.loads(Path(result["summary_path"]).read_text(encoding="utf-8"))
+    assert summary["render"]["full_page_background_embedded"] is False
+    assert summary["render"]["image_assets_rendered"] >= 1
+    assert (out / "artifacts" / "assets" / "page-0001.assets.json").exists()
+    with fitz.open(result["pdf_path"]) as pdf:
+        assert pdf.page_count == 1
+        assert len(pdf[0].get_images()) >= 1
 
 
 def test_tiff_input_creates_multiple_pages(tmp_path: Path) -> None:
@@ -471,5 +598,5 @@ def test_force_rebuilds_manifest(tmp_path: Path) -> None:
 
 def test_missing_input_directory_rejected(tmp_path: Path) -> None:
     out = tmp_path / "output"
-    with pytest.raises(Exception):
+    with pytest.raises(IngestError):
         ingest_book(tmp_path / "book-missing", out)

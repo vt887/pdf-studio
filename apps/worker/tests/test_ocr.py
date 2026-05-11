@@ -5,9 +5,9 @@ from pathlib import Path
 
 import fitz
 import pytest
-
 from document_model import StubPageInput, build_stub_document_model_from_pages
-from worker.ingest_book import _build_parser
+from pdf_renderer import render_document
+from worker.ingest_book import IngestError, _build_parser, _validate_ocr_input_path
 from worker.ocr import (
     OcrError,
     OcrLine,
@@ -17,12 +17,8 @@ from worker.ocr import (
     apply_ocr_results,
     px_to_pt,
 )
-from pdf_renderer import render_document
 
-
-TINY_PNG = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/m9kAAAAASUVORK5CYII="
-)
+TINY_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/m9kAAAAASUVORK5CYII=")
 
 
 def _write_png(path: Path) -> None:
@@ -220,12 +216,17 @@ def test_renderer_uses_page_text_lines(tmp_path: Path) -> None:
             )
         ],
     )
+    # Keep this test focused on OCR text rendering only; stub builder injects
+    # a default page-image asset that would otherwise be rendered as an image.
+    for page in document.pages:
+        page.assets = []
     render_document(document, pdf_path)
 
     with fitz.open(pdf_path) as pdf:
         assert pdf.page_count == 1
         extracted = pdf[0].get_text()
         assert "Selectable OCR text" in extracted
+        assert pdf[0].get_images() == []
 
 
 def test_tesseract_engine_fails_clearly_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -263,6 +264,28 @@ def test_ocr_result_preserves_normalized_artifact_path(tmp_path: Path) -> None:
         lines=[],
     )
     assert result.normalized_artifact == artifact
+
+
+def test_validate_ocr_input_rejects_source_artifact_in_auto_mixed(tmp_path: Path) -> None:
+    out = tmp_path / "output"
+    pages_dir = out / "artifacts" / "pages"
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    source = tmp_path / "book" / "001.png"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    _write_png(source)
+
+    page_manifest = {
+        "source_file": str(source),
+        "source_artifact": str(source),
+        "original_artifact": str(source),
+    }
+    with pytest.raises(IngestError, match="OCR input is a source screenshot/spread"):
+        _validate_ocr_input_path(
+            page_manifest=page_manifest,
+            normalized_artifact=source,
+            spread_mode="auto-mixed",
+            output_dir=out,
+        )
 
 
 def test_avg_confidence_from_lines() -> None:

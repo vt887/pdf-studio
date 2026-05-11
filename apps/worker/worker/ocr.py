@@ -199,11 +199,11 @@ class TesseractOcrEngine:
             "6",
             "tsv",
         ]
-        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        completed = subprocess.run(command, capture_output=True, text=False, check=False)
         if completed.returncode != 0:
-            stderr = completed.stderr.strip()
+            stderr = completed.stderr.decode("utf-8", errors="replace").strip()
             raise OcrError(f"Tesseract OCR failed for {image_path}: {stderr or completed.returncode}")
-        output = completed.stdout.strip()
+        output = completed.stdout.decode("utf-8", errors="replace").strip()
         if not output:
             return OcrPageResult(
                 page_number=page_number,

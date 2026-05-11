@@ -27,7 +27,7 @@ The goal is to reconstruct books and documents from scans in a way that remains 
 - Spread modes for screenshots: `single-page`, `two-page`, `auto`, and `auto-mixed`.
 - Mixed screenshot ingestion with per-file spread classification and optional overrides.
 - Structured document model generation in `output/book.model.json`.
-- PDF rendering in `output/book.pdf`.
+- Clean PDF rendering in `output/book.pdf`.
 - Per-run summary output in `output/book.summary.json`.
 - Per-page preprocessing metadata under `output/artifacts/pages/`.
 - Stage visibility and progress logging during ingestion.
@@ -65,6 +65,7 @@ One `book/` directory corresponds to one book or document.
 - The oldest file comes first.
 - The newest file comes last.
 - Screenshots may contain one or two pages depending on spread mode.
+- In mixed screenshot books, OCR quality depends on splitting two-page spreads into derived single-page artifacts before OCR.
 
 Supported spread modes:
 
@@ -85,9 +86,18 @@ The pipeline writes explicit artifacts to `output/`:
 
 - `output/book.manifest.json` records source files, spread classification, and page order.
 - `output/book.model.json` is the structured reconstruction model.
-- `output/book.pdf` is the rendered PDF.
+- `output/book.pdf` is the only PDF output.
 - `output/book.summary.json` records run-level stage status and render counts.
 - `output/artifacts/` contains normalized images and debug/processing artifacts.
+
+### PDF output
+
+`output/book.pdf` is the only PDF produced by pdf-studio.
+
+It is a clean OCR/reconstructed PDF generated from recognized text. It does not embed the original screenshots or normalized page images.
+
+Original and normalized images remain available in `book/` and `output/artifacts/pages/` for manual comparison.
+OCR should process derived normalized page artifacts (`output/artifacts/pages/*.normalized.png`), not raw source spread screenshots.
 
 ## How it works
 
@@ -162,6 +172,8 @@ BOOK_INPUT=book BOOK_OUTPUT=output make ingest-book-auto-mixed-force
 ## Where OCR runs
 
 OCR executes in the same environment as the ingestion command.
+For OCR quality, OCR must run on derived single-page artifacts from `manifest.pages[*].normalized_artifact`.
+If screenshots contain two pages, use `auto-mixed` or explicit `two-page` spread mode before OCR.
 
 **Local Poetry / Make targets** (`make ingest-book-ocr-force`, etc.) run OCR on the host machine and require Tesseract installed on the host:
 
@@ -291,3 +303,20 @@ Planned capabilities include:
 - Automatic spread detection may need overrides for ambiguous screenshots.
 - Output quality depends heavily on input scan quality.
 - OCR/layout/link reconstruction is still evolving and should be reviewed on real documents.
+
+## Optional local Ollama assistance
+
+Ollama can be used for local draft assistance on documentation and vault maintenance, but it is not required for the current baseline pipeline.
+
+## Optional AI review workflows
+
+pdf-studio can use optional advisory agents during development:
+
+- Claude for architecture, prompt, code, and test-plan review.
+- Gemini for second-opinion and multimodal OCR/PDF/screenshot review.
+- OpenCode for local heavy codebase review and implementation planning.
+- Ollama for local low-risk documentation drafting.
+
+Codex remains responsible for final implementation and verification.
+
+These tools are not required for the baseline local pipeline.

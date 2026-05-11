@@ -52,19 +52,41 @@ def _center_band_white_ratio(image: Image.Image) -> float:
     return white / len(pixels)
 
 
+def _center_band_dark_ratio(image: Image.Image) -> float:
+    grayscale = image.convert("L")
+    width, height = grayscale.size
+    band_width = max(int(width * 0.08), 32)
+    left = max((width - band_width) // 2, 0)
+    right = min(left + band_width, width)
+    band = grayscale.crop((left, 0, right, height))
+    pixels = list(band.getdata())
+    if not pixels:
+        return 0.0
+    dark = sum(1 for value in pixels if value <= 20)
+    return dark / len(pixels)
+
+
 def detect_spread_type(image: Image.Image) -> tuple[SpreadType, float | None, dict[str, float]]:
     width, height = image.size
     aspect_ratio = round(width / height, 4) if height else 0.0
     center_white_ratio = round(_center_band_white_ratio(image), 4)
+    center_dark_ratio = round(_center_band_dark_ratio(image), 4)
     spread_score = round(max(0.0, aspect_ratio - 1.35) + max(0.0, 0.75 - center_white_ratio), 4)
-    signals = {"aspect_ratio": aspect_ratio, "spread_score": spread_score, "center_white_ratio": center_white_ratio}
+    signals = {
+        "aspect_ratio": aspect_ratio,
+        "spread_score": spread_score,
+        "center_white_ratio": center_white_ratio,
+        "center_dark_ratio": center_dark_ratio,
+    }
 
     if aspect_ratio <= 1.2:
         confidence = round(min(0.99, max(0.5, 1.0 - (1.2 - aspect_ratio))), 4)
         return "single-page", confidence, signals
-    if aspect_ratio >= 1.65 and center_white_ratio >= 0.45:
+    if aspect_ratio >= 1.55 and (center_white_ratio >= 0.42 or center_dark_ratio >= 0.42):
         confidence = round(min(0.99, max(0.5, min((aspect_ratio - 1.65) / 0.6 + 0.5, 0.99))), 4)
         return "two-page", confidence, signals
+    if aspect_ratio >= 1.75:
+        return "two-page", 0.5, signals
     return "uncertain", None, signals
 
 

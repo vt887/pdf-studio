@@ -3,8 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import fitz
-
-from document_model.schema import DocumentModel, Link, PageModel, TextLine
+from document_model.schema import DocumentModel, Link, PageModel
 
 
 def _resolve_fontname(font_family: str | None, font_weight: str | None, font_style: str | None) -> str:
@@ -25,6 +24,15 @@ def _hex_to_rgb(value: str) -> tuple[float, float, float]:
     if len(cleaned) != 6:
         return (0, 0, 0)
     return tuple(int(cleaned[i : i + 2], 16) / 255 for i in (0, 2, 4))
+
+
+def _render_page_assets(page: fitz.Page, page_model: PageModel) -> None:
+    for asset in page_model.assets:
+        asset_path = Path(asset.asset_path)
+        if not asset_path.exists():
+            continue
+        rect = fitz.Rect(asset.x, asset.y, asset.x + asset.w, asset.y + asset.h)
+        page.insert_image(rect, filename=str(asset_path), overlay=True)
 
 
 def _render_page_text(page: fitz.Page, page_model: PageModel) -> None:
@@ -66,9 +74,7 @@ def render_document(document: DocumentModel, output_path: str | Path) -> Path:
     pdf = fitz.open()
     for page_model in document.pages:
         page = pdf.new_page(width=page_model.width_pt, height=page_model.height_pt)
-        for asset in page_model.assets:
-            rect = fitz.Rect(asset.x, asset.y, asset.x + asset.w, asset.y + asset.h)
-            page.insert_image(rect, filename=asset.asset_path)
+        _render_page_assets(page, page_model)
         _render_page_text(page, page_model)
         _render_page_links(page, page_model)
     pdf.save(output_path)

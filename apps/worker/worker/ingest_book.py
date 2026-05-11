@@ -5,10 +5,10 @@ import contextlib
 import hashlib
 import json
 import re
-import sys
 import shutil
-import uuid
+import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,8 +17,16 @@ from typing import Any
 import fitz
 from document_model import StubPageInput, build_stub_document_model_from_pages, save_document_model
 from pdf_renderer import render_document
-from worker.spread import SpreadMode, SpreadDetectionResult, classify_spread, crop_boxes_for_spread, load_spread_overrides
+
+from worker.assets import extract_page_image_assets
 from worker.ocr import OcrEngine, OcrError, OcrPageResult, TesseractOcrEngine, apply_ocr_results
+from worker.spread import (
+    SpreadDetectionResult,
+    SpreadMode,
+    classify_spread,
+    crop_boxes_for_spread,
+    load_spread_overrides,
+)
 
 TARGET_DPI = 300
 SUPPORTED_TYPES = {"png", "jpeg", "tiff", "pdf"}
@@ -548,6 +556,40 @@ def _materialize_ocr_result(
     return result
 
 
+def _validate_ocr_input_path(
+    *,
+    page_manifest: dict[str, Any],
+    normalized_artifact: Path,
+    spread_mode: str,
+    output_dir: Path,
+) -> None:
+    normalized_abs = normalized_artifact.resolve()
+    pages_dir_abs = (output_dir / "artifacts" / "pages").resolve()
+    source_file = Path(str(page_manifest.get("source_file", "")))
+    source_artifact = Path(str(page_manifest.get("source_artifact", "")))
+    original_artifact = Path(str(page_manifest.get("original_artifact", "")))
+
+    if spread_mode in {"two-page", "auto", "auto-mixed"} and pages_dir_abs not in normalized_abs.parents:
+        raise IngestError(
+            "OCR input is a source screenshot/spread, expected derived page artifact from manifest.pages",
+            stage="ocr",
+            path=normalized_artifact,
+            suggestion="Rebuild manifest/pages artifacts and ensure OCR reads manifest.pages[*].normalized_artifact.",
+        )
+
+    forbidden: list[Path] = []
+    for candidate in (source_file, source_artifact, original_artifact):
+        if str(candidate):
+            forbidden.append(candidate.resolve() if candidate.exists() else candidate)
+    if any(normalized_abs == candidate for candidate in forbidden):
+        raise IngestError(
+            "OCR input is a source screenshot/spread, expected derived page artifact from manifest.pages",
+            stage="ocr",
+            path=normalized_artifact,
+            suggestion="Use spread splitting first, then run OCR on output/artifacts/pages/*.normalized.png.",
+        )
+
+
 def _load_manifest(manifest_path: Path) -> dict[str, object] | None:
     if not manifest_path.exists():
         return None
@@ -608,7 +650,7 @@ def _process_existing_manifest_pages(
                 stage="manifest",
                 path=source_path,
                 suggestion="Restore the source file or rebuild the manifest with `--force`.",
-        )
+            )
         file_type = _detect_input_type(source_path)
         page_number = int(page["page_number"])
         source_page_index = int(page.get("source_page_index", 1))
@@ -869,13 +911,15 @@ def _build_manifest_from_sources(
                 allow_regen_missing=True,
                 logger=logger,
             )
-            source_entry_pages.append({
-                "page_number": page_number,
-                "side": side,
-                "crop_box_px": list(crop_box_px),
-                "source_artifact": str(plan["source_artifact"]),
-                "normalized_artifact": str(result.manifest_entry["normalized_artifact"]),
-            })
+            source_entry_pages.append(
+                {
+                    "page_number": page_number,
+                    "side": side,
+                    "crop_box_px": list(crop_box_px),
+                    "source_artifact": str(plan["source_artifact"]),
+                    "normalized_artifact": str(result.manifest_entry["normalized_artifact"]),
+                }
+            )
             flat_pages.append(result.manifest_entry)
             page_inputs.append(result.page_input)
             rebuilt_map[result.page_input.page_number] = result.artifacts_rebuilt
@@ -942,11 +986,14 @@ def _write_summary(output_dir: Path, payload: RunSummary) -> Path:
     return path
 
 
-def _render_counts(document) -> dict[str, int]:
+def _render_counts(document) -> dict[str, Any]:
+    image_assets = sum(len(page.assets) for page in document.pages)
     return {
         "pages_rendered": len(document.pages),
-        "image_assets_rendered": sum(len(page.assets) for page in document.pages),
+        "image_assets_rendered": image_assets,
+        "page_images_included": bool(image_assets),
         "text_lines_rendered": sum(len(page.text_lines) for page in document.pages),
+        "words_rendered": sum(len(page.words) for page in document.pages),
         "links_rendered": sum(len(page.links) for page in document.pages),
     }
 
@@ -960,6 +1007,7 @@ def ingest_book(
     ocr: bool = False,
     ocr_lang: str = "eng",
     ocr_engine: OcrEngine | None = None,
+    extract_images: bool = False,
     quiet: bool = False,
     verbose: bool = False,
     logger: PipelineLogger | None = None,
@@ -1002,8 +1050,11 @@ def ingest_book(
     pages_dir = output_dir / "artifacts" / "pages"
     pages_dir.mkdir(parents=True, exist_ok=True)
     ocr_dir = output_dir / "artifacts" / "ocr"
+    assets_dir = output_dir / "artifacts" / "assets"
     if ocr:
         ocr_dir.mkdir(parents=True, exist_ok=True)
+    if extract_images:
+        assets_dir.mkdir(parents=True, exist_ok=True)
     _finish_stage(
         stage_ingest,
         started_ingest,
@@ -1012,6 +1063,7 @@ def ingest_book(
             "output_dir": str(output_dir),
             "artifacts_dir": str(output_dir / "artifacts"),
             "ocr_enabled": ocr,
+            "extract_images": extract_images,
         },
     )
 
@@ -1089,15 +1141,31 @@ def ingest_book(
         output_pdf_path=output_dir / "book.pdf",
         document_id=str(manifest_payload["document_id"]),
     )
+    for page in document.pages:
+        page.assets = [asset for asset in page.assets if asset.asset_type != "page-image"]
     if ocr:
         try:
             engine = ocr_engine or TesseractOcrEngine()
         except OcrError as exc:
             raise IngestError(str(exc), stage="ocr") from exc
         ocr_results: list[OcrPageResult] = []
+        manifest_pages_by_number = {int(item["page_number"]): item for item in manifest_payload["pages"]}
+        total_ocr_lines = 0
+        total_ocr_words = 0
         for page in document.pages:
-            page_manifest = next(item for item in manifest_payload["pages"] if int(item["page_number"]) == page.page_number)
+            page_manifest = manifest_pages_by_number[page.page_number]
             normalized_artifact = Path(str(page_manifest["normalized_artifact"]))
+            _validate_ocr_input_path(
+                page_manifest=page_manifest,
+                normalized_artifact=normalized_artifact,
+                spread_mode=str(summary.spread_mode),
+                output_dir=output_dir,
+            )
+            page_label = f"{page.page_number:04d}"
+            logger.stage("ocr", f"page {page_label}")
+            logger.stage("ocr", f"input: {normalized_artifact}")
+            logger.stage("ocr", f"source_file: {page_manifest.get('source_file', '')}")
+            logger.stage("ocr", f"side: {page_manifest.get('side', 'single')}")
             ocr_result = _materialize_ocr_result(
                 engine=engine,
                 normalized_artifact=normalized_artifact,
@@ -1108,17 +1176,55 @@ def ingest_book(
                 force=force,
                 artifacts_rebuilt=rebuilt_map.get(page.page_number, False),
             )
-            page_label = f"{page.page_number:04d}"
             word_count = sum(len(line.words) for line in ocr_result.lines)
             confidences = [line.confidence for line in ocr_result.lines if line.confidence is not None]
             avg_conf = f"{sum(confidences) / len(confidences):.2f}" if confidences else "n/a"
-            logger.stage("ocr", f"page {page_label} lines: {len(ocr_result.lines)} words: {word_count} avg_confidence: {avg_conf}")
+            logger.stage("ocr", f"lines: {len(ocr_result.lines)}")
+            logger.stage("ocr", f"words: {word_count}")
+            logger.stage("ocr", f"avg confidence: {avg_conf}")
             logger.detail("ocr", f"engine: {ocr_result.engine} language: {ocr_result.language}")
-            logger.detail("ocr", f"artifact: {_ocr_artifact_path(ocr_dir, page.page_number)}")
+            logger.stage("ocr", f"artifact: {_ocr_artifact_path(ocr_dir, page.page_number)}")
             if not ocr_result.lines:
                 logger.stage("ocr:warn", f"page {page_label} produced no text")
+            total_ocr_lines += len(ocr_result.lines)
+            total_ocr_words += word_count
             ocr_results.append(ocr_result)
+        logger.stage("ocr", "summary:")
+        logger.stage("ocr", f"  derived pages: {len(document.pages)}")
+        logger.stage("ocr", f"  ocr artifacts: {len(ocr_results)}")
+        logger.stage("ocr", f"  total lines: {total_ocr_lines}")
+        logger.stage("ocr", f"  total words: {total_ocr_words}")
         apply_ocr_results(document, ocr_results)
+
+    if extract_images:
+        stage_assets, started_assets = _new_stage_record("extract-images")
+        summary.stages.append(stage_assets)
+        total_detected = 0
+        total_saved = 0
+        for page in document.pages:
+            result = extract_page_image_assets(page=page, output_assets_dir=assets_dir)
+            logger.stage("assets", f"page {page.page_number:04d}")
+            logger.stage("assets", f"input: {result.input_path}")
+            logger.stage("assets", f"text boxes used: {result.text_boxes_used}")
+            logger.stage("assets", f"candidates: {result.candidates}")
+            logger.stage("assets", f"accepted: {result.accepted}")
+            for saved in result.saved_paths:
+                logger.stage("assets", f"saved: {saved}")
+            total_detected += result.assets_detected
+            total_saved += result.assets_saved
+        logger.stage("assets", "summary:")
+        logger.stage("assets", f"  pages: {len(document.pages)}")
+        logger.stage("assets", f"  assets detected: {total_detected}")
+        logger.stage("assets", f"  assets saved: {total_saved}")
+        _finish_stage(
+            stage_assets,
+            started_assets,
+            key_outputs={
+                "assets_dir": str(assets_dir),
+                "assets_detected": total_detected,
+                "assets_saved": total_saved,
+            },
+        )
     model_path = output_dir / "book.model.json"
     save_document_model(document, model_path)
     summary.model_path = str(model_path)
@@ -1135,23 +1241,26 @@ def ingest_book(
 
     stage_render, started_render = _new_stage_record("render")
     summary.stages.append(stage_render)
-    logger.stage("render", f"writing PDF to {output_dir / 'book.pdf'}")
+    logger.stage("render", f"pdf: {output_dir / 'book.pdf'}")
+    logger.stage("render", "mode: clean")
+    logger.stage("render", "page images: skipped")
+    for page in document.pages:
+        if not page.text_lines:
+            logger.stage("render:warn", f"page {page.page_number:04d} has no OCR text; rendered blank page")
     pdf_path = render_document(document, output_dir / "book.pdf")
     render_counts = _render_counts(document)
     pdf_size = Path(pdf_path).stat().st_size
     summary.pdf_path = str(pdf_path)
-    summary.render = {**render_counts, "pdf_file_size": pdf_size}
-    logger.stage(
-        "render",
-        "output={output} pages={pages} image_assets={assets} text_lines={lines} links={links} size={size}".format(
-            output=pdf_path,
-            pages=render_counts["pages_rendered"],
-            assets=render_counts["image_assets_rendered"],
-            lines=render_counts["text_lines_rendered"],
-            links=render_counts["links_rendered"],
-            size=pdf_size,
-        ),
-    )
+    summary.render = {
+        "pdf": str(pdf_path),
+        "mode": "clean",
+        **render_counts,
+        "pdf_file_size": pdf_size,
+        "full_page_background_embedded": False,
+    }
+    logger.stage("render", f"text lines rendered: {render_counts['text_lines_rendered']}")
+    logger.stage("render", f"words rendered: {render_counts['words_rendered']}")
+    logger.stage("render", f"pdf size: {pdf_size}")
     _finish_stage(stage_render, started_render, key_outputs={**render_counts, "pdf_path": str(pdf_path), "pdf_file_size": pdf_size})
 
     stage_summary, started_summary = _new_stage_record("summary")
@@ -1192,6 +1301,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Spread detection mode for mixed screenshot books",
     )
     parser.add_argument("--ocr", action="store_true", help="Run OCR on normalized page images")
+    parser.add_argument("--extract-images", action="store_true", help="Extract non-text image regions and render them as assets")
     parser.add_argument("--ocr-lang", default="eng", help="OCR language code")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--quiet", action="store_true", help="Suppress stage progress logs")
@@ -1210,6 +1320,7 @@ def main() -> None:
             spread_mode=args.spread_mode,
             ocr=args.ocr,
             ocr_lang=args.ocr_lang,
+            extract_images=args.extract_images,
             quiet=args.quiet,
             verbose=args.verbose,
             logger=PipelineLogger(quiet=args.quiet, verbose=args.verbose),
